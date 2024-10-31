@@ -21,7 +21,7 @@ inputs:
   rust-version:
     description: 'version of rust to install (e.g. stable)'
     required: false
-    default: 'stable'
+    default: '1.79'
   target:
     description: 'target architecture(s)'
     required: false
