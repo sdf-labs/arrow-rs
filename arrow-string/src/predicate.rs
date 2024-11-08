@@ -17,7 +17,7 @@
 
 use arrow_array::{ArrayAccessor, BooleanArray};
 use arrow_schema::ArrowError;
-use memchr::memchr2;
+use memchr::memchr3;
 use regex::{Regex, RegexBuilder};
 
 /// A string based predicate
@@ -42,16 +42,12 @@ impl<'a> Predicate<'a> {
     pub fn like(pattern: &'a str) -> Result<Self, ArrowError> {
         if !contains_like_pattern(pattern) {
             Ok(Self::Eq(pattern))
-        } else if pattern.ends_with('%')
-            && !pattern.ends_with("\\%")
-            && !contains_like_pattern(&pattern[..pattern.len() - 1])
-        {
+        } else if pattern.ends_with('%') && !contains_like_pattern(&pattern[..pattern.len() - 1]) {
             Ok(Self::StartsWith(&pattern[..pattern.len() - 1]))
         } else if pattern.starts_with('%') && !contains_like_pattern(&pattern[1..]) {
             Ok(Self::EndsWith(&pattern[1..]))
         } else if pattern.starts_with('%')
             && pattern.ends_with('%')
-            && !pattern.ends_with("\\%")
             && !contains_like_pattern(&pattern[1..pattern.len() - 1])
         {
             Ok(Self::Contains(&pattern[1..pattern.len() - 1]))
@@ -145,34 +141,50 @@ fn ends_with_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 /// 3. Replace escaped like wildcards removing the escape characters to be able to match it as a regex. For example: `\\%` => `%`
 fn regex_like(pattern: &str, case_insensitive: bool) -> Result<Regex, ArrowError> {
     let mut result = String::with_capacity(pattern.len() * 2);
-    result.push('^');
     let mut chars_iter = pattern.chars().peekable();
+    match chars_iter.peek() {
+        // if the pattern starts with `%`, we avoid starting the regex with a slow but meaningless `^.*`
+        Some('%') => {
+            chars_iter.next();
+        }
+        _ => result.push('^'),
+    };
     while let Some(c) = chars_iter.next() {
-        if c == '\\' {
-            let next = chars_iter.peek();
-            match next {
-                Some(next) if is_like_pattern(*next) => {
-                    result.push(*next);
-                    // Skipping the next char as it is already appended
-                    chars_iter.next();
-                }
-                _ => {
-                    result.push('\\');
-                    result.push('\\');
+        match c {
+            '\\' => {
+                match chars_iter.peek() {
+                    Some(&next) => {
+                        if regex_syntax::is_meta_character(next) {
+                            result.push('\\');
+                        }
+                        result.push(next);
+                        // Skipping the next char as it is already appended
+                        chars_iter.next();
+                    }
+                    None => {
+                        // Trailing backslash in the pattern. E.g. PostgreSQL and Trino treat it as an error, but e.g. Snowflake treats it as a literal backslash
+                        result.push('\\');
+                        result.push('\\');
+                    }
                 }
             }
-        } else if regex_syntax::is_meta_character(c) {
-            result.push('\\');
-            result.push(c);
-        } else if c == '%' {
-            result.push_str(".*");
-        } else if c == '_' {
-            result.push('.');
-        } else {
-            result.push(c);
+            '%' => result.push_str(".*"),
+            '_' => result.push('.'),
+            c => {
+                if regex_syntax::is_meta_character(c) {
+                    result.push('\\');
+                }
+                result.push(c);
+            }
         }
     }
-    result.push('$');
+    // instead of ending the regex with `.*$` and making it needlessly slow, we just end the regex
+    if result.ends_with(".*") {
+        result.pop();
+        result.pop();
+    } else {
+        result.push('$');
+    }
     RegexBuilder::new(&result)
         .case_insensitive(case_insensitive)
         .dot_matches_new_line(true)
@@ -184,12 +196,8 @@ fn regex_like(pattern: &str, case_insensitive: bool) -> Result<Regex, ArrowError
         })
 }
 
-fn is_like_pattern(c: char) -> bool {
-    c == '%' || c == '_'
-}
-
 fn contains_like_pattern(pattern: &str) -> bool {
-    memchr2(b'%', b'_', pattern.as_bytes()).is_some()
+    memchr3(b'%', b'_', b'\\', pattern.as_bytes()).is_some()
 }
 
 #[cfg(test)]
@@ -197,34 +205,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_replace_like_wildcards() {
-        let a_eq = "_%";
-        let expected = "^..*$";
-        let r = regex_like(a_eq, false).unwrap();
-        assert_eq!(r.to_string(), expected);
-    }
+    fn test_regex_like() {
+        let test_cases = [
+            // %..%
+            (r"%foobar%", r"foobar"),
+            // ..%..
+            (r"foo%bar", r"^foo.*bar$"),
+            // .._..
+            (r"foo_bar", r"^foo.bar$"),
+            // escaped wildcards
+            (r"\%\_", r"^%_$"),
+            // escaped non-wildcard
+            (r"\a", r"^a$"),
+            // escaped escape and wildcard
+            (r"\\%", r"^\\"),
+            // escaped escape and non-wildcard
+            (r"\\a", r"^\\a$"),
+            // regex meta character
+            (r".", r"^\.$"),
+            (r"$", r"^\$$"),
+            (r"\\", r"^\\$"),
+        ];
 
-    #[test]
-    fn test_replace_like_wildcards_leave_like_meta_chars() {
-        let a_eq = "\\%\\_";
-        let expected = "^%_$";
-        let r = regex_like(a_eq, false).unwrap();
-        assert_eq!(r.to_string(), expected);
-    }
-
-    #[test]
-    fn test_replace_like_wildcards_with_multiple_escape_chars() {
-        let a_eq = "\\\\%";
-        let expected = "^\\\\%$";
-        let r = regex_like(a_eq, false).unwrap();
-        assert_eq!(r.to_string(), expected);
-    }
-
-    #[test]
-    fn test_replace_like_wildcards_escape_regex_meta_char() {
-        let a_eq = ".";
-        let expected = "^\\.$";
-        let r = regex_like(a_eq, false).unwrap();
-        assert_eq!(r.to_string(), expected);
+        for (like_pattern, expected_regexp) in test_cases {
+            let r = regex_like(like_pattern, false).unwrap();
+            assert_eq!(r.to_string(), expected_regexp);
+        }
     }
 }
