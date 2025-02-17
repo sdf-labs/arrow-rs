@@ -365,7 +365,11 @@ impl Iterator for ArrowArrayStreamReader {
             let result = unsafe {
                 from_ffi_and_data_type(array, DataType::Struct(self.schema().fields().clone()))
             };
-            Some(result.and_then(|data| {
+            Some(result.and_then(|mut data| {
+                // Ensure data is aligned (by potentially copying some buffers).
+                // This is needed because some Arrow C Data Interface sources(e.g.
+                // ADBC drivers) may produce unaligned buffers.
+                data.align_buffers();
                 let len = data.len();
                 RecordBatch::try_new_with_options(
                     self.schema.clone(),
