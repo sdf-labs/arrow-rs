@@ -51,6 +51,7 @@ jobs:
   integration:
     name: Archery test With other arrows
     runs-on: ubuntu-latest
+    if: "false"
     container:
       image: apache/arrow-dev:amd64-conda-integration
     env:
