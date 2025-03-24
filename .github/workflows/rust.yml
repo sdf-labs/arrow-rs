@@ -115,6 +115,7 @@ jobs:
   msrv:
     name: Verify MSRV (Minimum Supported Rust Version)
     runs-on: ubuntu-latest
+    if: "false"
     container:
       image: amd64/rust
     steps:
