@@ -25,6 +25,8 @@ use arrow_schema::DataType;
 use std::any::Any;
 use std::sync::Arc;
 
+use super::SymbolicArrayData;
+
 /// An array of [boolean values](https://arrow.apache.org/docs/format/Columnar.html#fixed-size-primitive-layout)
 ///
 /// # Example: From a Vec
@@ -68,6 +70,7 @@ use std::sync::Arc;
 pub struct BooleanArray {
     values: BooleanBuffer,
     nulls: Option<NullBuffer>,
+    symbolic_data: Option<Vec<super::SymbolicExpr>>,
 }
 
 impl std::fmt::Debug for BooleanArray {
@@ -76,7 +79,11 @@ impl std::fmt::Debug for BooleanArray {
         print_long_array(self, f, |array, index, f| {
             std::fmt::Debug::fmt(&array.value(index), f)
         })?;
-        write!(f, "]")
+        write!(f, "]")?;
+        if let Some(symbolic_data) = &self.symbolic_data {
+            write!(f, ",\n{:?}", symbolic_data)?;
+        }
+        Ok(())
     }
 }
 
@@ -90,7 +97,11 @@ impl BooleanArray {
         if let Some(n) = nulls.as_ref() {
             assert_eq!(values.len(), n.len());
         }
-        Self { values, nulls }
+        Self {
+            values,
+            nulls,
+            symbolic_data: None,
+        }
     }
 
     /// Create a new [`BooleanArray`] with length `len` consisting only of nulls
@@ -98,6 +109,7 @@ impl BooleanArray {
         Self {
             values: BooleanBuffer::new_unset(len),
             nulls: Some(NullBuffer::new_null(len)),
+            symbolic_data: None,
         }
     }
 
@@ -128,6 +140,15 @@ impl BooleanArray {
         BooleanBuffer::new(Buffer::from(value), 0, value.len() * 8).into()
     }
 
+    /// Clone a new [`PrimitiveArray`] with the supplied symbolic data
+    pub fn with_symbolic_data(&self, symbolic_data: &[super::SymbolicExpr]) -> Self {
+        Self {
+            values: self.values.clone(),
+            nulls: self.nulls.clone(),
+            symbolic_data: Some(symbolic_data.to_vec()),
+        }
+    }
+
     /// Returns the length of this array.
     pub fn len(&self) -> usize {
         self.values.len()
@@ -143,6 +164,10 @@ impl BooleanArray {
         Self {
             values: self.values.slice(offset, length),
             nulls: self.nulls.as_ref().map(|n| n.slice(offset, length)),
+            symbolic_data: self
+                .symbolic_data
+                .as_ref()
+                .map(|s| s[offset..offset + length].to_vec()),
         }
     }
 
@@ -277,6 +302,21 @@ impl BooleanArray {
     pub fn into_parts(self) -> (BooleanBuffer, Option<NullBuffer>) {
         (self.values, self.nulls)
     }
+
+    /// Convert the array to symbolic data
+    pub fn make_symbolic_data(&self) -> super::SymbolicArrayData {
+        let mut symbolic_data = vec![];
+        for i in 0..self.len() {
+            let lit = super::SymbolicScalarValue::Boolean(Some(self.value(i)));
+            symbolic_data.push(super::SymbolicExpr::Literal(lit));
+        }
+        symbolic_data
+    }
+
+    /// Return array's symbolic data if it exists, otherwise return None
+    pub fn to_maybe_symbolic_data(&self) -> Option<Vec<super::SymbolicExpr>> {
+        self.symbolic_data.clone()
+    }
 }
 
 impl Array for BooleanArray {
@@ -338,6 +378,16 @@ impl Array for BooleanArray {
     fn get_array_memory_size(&self) -> usize {
         std::mem::size_of::<Self>() + self.get_buffer_memory_size()
     }
+
+    fn to_symbolic_data(&self) -> SymbolicArrayData {
+        self.symbolic_data
+            .clone()
+            .unwrap_or(self.make_symbolic_data())
+    }
+
+    fn with_symbolic_data(&self, symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        Arc::new(self.with_symbolic_data(symbolic_data))
+    }
 }
 
 impl ArrayAccessor for &BooleanArray {
@@ -397,6 +447,7 @@ impl From<ArrayData> for BooleanArray {
         Self {
             values,
             nulls: data.nulls().cloned(),
+            symbolic_data: None,
         }
     }
 }
@@ -471,6 +522,7 @@ impl From<BooleanBuffer> for BooleanArray {
         Self {
             values,
             nulls: None,
+            symbolic_data: None,
         }
     }
 }

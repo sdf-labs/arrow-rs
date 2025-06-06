@@ -576,6 +576,14 @@ impl<OffsetSize: OffsetSizeTrait> Array for GenericListArray<OffsetSize> {
         }
         size
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl<OffsetSize: OffsetSizeTrait> ArrayAccessor for &GenericListArray<OffsetSize> {

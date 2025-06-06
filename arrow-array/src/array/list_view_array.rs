@@ -432,6 +432,14 @@ impl<OffsetSize: OffsetSizeTrait> Array for GenericListViewArray<OffsetSize> {
         }
         size
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl<OffsetSize: OffsetSizeTrait> std::fmt::Debug for GenericListViewArray<OffsetSize> {

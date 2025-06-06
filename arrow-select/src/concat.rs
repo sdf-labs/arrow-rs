@@ -292,7 +292,17 @@ pub fn concat_batches<'a>(
         )?;
         arrays.push(array);
     }
-    RecordBatch::try_new(schema.clone(), arrays)
+    let options = RecordBatchOptions::new();
+    let mut constraints = vec![];
+    let mut is_some = false;
+    for batch in batches {
+        if let Some(c) = batch.constraints().map(|c| c.to_vec()) {
+            is_some = true;
+            constraints.extend(c);
+        }
+    }
+    let constraints = if is_some { Some(constraints) } else { None };
+    RecordBatch::try_new_with_options_and_constraints(schema.clone(), arrays, &options, constraints)
 }
 
 #[cfg(test)]

@@ -436,6 +436,14 @@ impl Array for FixedSizeListArray {
         }
         size
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl ArrayAccessor for FixedSizeListArray {

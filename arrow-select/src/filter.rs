@@ -217,7 +217,29 @@ pub fn filter_record_batch(
         .map(|a| filter_array(a, &filter))
         .collect::<Result<Vec<_>, _>>()?;
     let options = RecordBatchOptions::default().with_row_count(Some(filter.count()));
-    RecordBatch::try_new_with_options(record_batch.schema(), filtered_arrays, &options)
+    let constraints = predicate.to_maybe_symbolic_data().map(|exprs| {
+        exprs
+            .iter()
+            .enumerate()
+            .map(|(i, expr)| {
+                dbg!(&predicate.value(i));
+                if predicate.value(i) {
+                    expr.clone()
+                } else {
+                    SymbolicExpr::not(expr.clone())
+                }
+            })
+            .collect::<Vec<_>>()
+    });
+
+    dbg!(&constraints);
+
+    RecordBatch::try_new_with_options_and_constraints(
+        record_batch.schema(),
+        filtered_arrays,
+        &options,
+        constraints,
+    )
 }
 
 /// A builder to construct [`FilterPredicate`]

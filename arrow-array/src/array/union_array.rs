@@ -924,6 +924,14 @@ impl Array for UnionArray {
                 .sum::<usize>()
             + sum
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl std::fmt::Debug for UnionArray {

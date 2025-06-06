@@ -132,6 +132,14 @@ impl Array for NullArray {
     fn get_array_memory_size(&self) -> usize {
         std::mem::size_of::<Self>()
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl From<ArrayData> for NullArray {

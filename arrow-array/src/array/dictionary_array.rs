@@ -787,6 +787,14 @@ impl<T: ArrowDictionaryKeyType> Array for DictionaryArray<T> {
             + self.keys.get_buffer_memory_size()
             + self.values.get_array_memory_size()
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl<T: ArrowDictionaryKeyType> std::fmt::Debug for DictionaryArray<T> {
@@ -905,6 +913,14 @@ impl<K: ArrowDictionaryKeyType, V: Sync> Array for TypedDictionaryArray<'_, K, V
 
     fn get_array_memory_size(&self) -> usize {
         self.dictionary.get_array_memory_size()
+    }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
     }
 }
 
