@@ -270,14 +270,16 @@ pub fn concat_batches<'a>(
     input_batches: impl IntoIterator<Item = &'a RecordBatch>,
 ) -> Result<RecordBatch, ArrowError> {
     // When schema is empty, sum the number of the rows of all batches
+    let x = input_batches.into_iter().collect::<Vec<_>>();
+    dbg!(&x);
     if schema.fields().is_empty() {
-        let num_rows: usize = input_batches.into_iter().map(RecordBatch::num_rows).sum();
+        let num_rows: usize = x.iter().cloned().map(RecordBatch::num_rows).sum();
         let mut options = RecordBatchOptions::default();
         options.row_count = Some(num_rows);
         return RecordBatch::try_new_with_options(schema.clone(), vec![], &options);
     }
 
-    let batches: Vec<&RecordBatch> = input_batches.into_iter().collect();
+    let batches: Vec<&RecordBatch> = x;
     if batches.is_empty() {
         return Ok(RecordBatch::new_empty(schema.clone()));
     }

@@ -116,8 +116,6 @@ pub trait Array: std::fmt::Debug + Send + Sync {
     /// Returns the underlying data of this array
     fn to_data(&self) -> ArrayData;
 
-    // fn to_symbolic_data(&self) -> SymbolicArrayData;
-
     /// Returns the underlying data of this array
     ///
     /// Unlike [`Array::to_data`] this consumes self, allowing it avoid unnecessary clones
@@ -368,10 +366,6 @@ impl Array for ArrayRef {
         self.as_ref().to_data()
     }
 
-    // fn to_symbolic_data(&self) -> SymbolicArrayData {
-    //     self.as_ref().to_symbolic_data()
-    // }
-
     fn into_data(self) -> ArrayData {
         self.to_data()
     }
@@ -458,10 +452,6 @@ impl<T: Array> Array for &T {
     fn to_data(&self) -> ArrayData {
         T::to_data(self)
     }
-
-    // fn to_symbolic_data(&self) -> SymbolicArrayData {
-    //     T::to_symbolic_data(self)
-    // }
 
     fn into_data(self) -> ArrayData {
         self.to_data()
