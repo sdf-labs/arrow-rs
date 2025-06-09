@@ -632,10 +632,7 @@ impl RecordBatch {
             .map(|column| column.slice(offset, length))
             .collect();
 
-        let constraints = self
-            .constraints
-            .as_ref()
-            .map(|c| c[offset..offset + length].to_vec());
+        let constraints = self.constraints.clone();
 
         Self {
             schema: self.schema.clone(),
