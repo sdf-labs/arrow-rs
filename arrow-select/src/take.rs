@@ -92,10 +92,11 @@ pub fn take(
             take_impl($values, &indices)
         }};
     }
-    downcast_integer! {
+    let result = downcast_integer! {
         indices.data_type() => (helper, values, indices, options),
         d => Err(ArrowError::InvalidArgumentError(format!("Take only supported for integers, got {d:?}")))
-    }
+    };
+    result
 }
 
 /// For each [ArrayRef] in the [`Vec<ArrayRef>`], take elements by index and create a new
@@ -379,7 +380,8 @@ where
 {
     let values_buf = take_native(values.values(), indices);
     let nulls = take_nulls(values.nulls(), indices);
-    Ok(PrimitiveArray::new(values_buf, nulls).with_data_type(values.data_type().clone()))
+    let symbolic_data = values.to_symbolic_data();
+    Ok(PrimitiveArray::new(values_buf, nulls).with_data_type(values.data_type().clone()).with_symbolic_data(&symbolic_data))
 }
 
 #[inline(never)]
