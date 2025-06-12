@@ -181,7 +181,6 @@ pub fn filter(values: &dyn Array, predicate: &BooleanArray) -> Result<ArrayRef, 
     }
 
     let predicate = filter_builder.build();
-
     filter_array(values, &predicate)
 }
 
@@ -203,7 +202,6 @@ pub fn filter_record_batch(
     record_batch: &RecordBatch,
     predicate: &BooleanArray,
 ) -> Result<RecordBatch, ArrowError> {
-    dbg!(&record_batch);
     let mut filter_builder = FilterBuilder::new(predicate);
     if record_batch.num_columns() > 1 {
         // Only optimize if filtering more than one column
@@ -223,7 +221,6 @@ pub fn filter_record_batch(
             .iter()
             .enumerate()
             .map(|(i, expr)| {
-                dbg!(&predicate.value(i));
                 if predicate.value(i) {
                     expr.clone()
                 } else {
@@ -233,7 +230,13 @@ pub fn filter_record_batch(
             .collect::<Vec<_>>()
     });
 
-    dbg!(&constraints);
+    let mut all_constraints = if let Some(constraints) = record_batch.constraints() {
+        constraints.to_vec()
+    } else {
+        vec![]
+    };
+    all_constraints.extend(constraints.unwrap_or_default());
+    let constraints = Some(all_constraints);
 
     RecordBatch::try_new_with_options_and_constraints(
         record_batch.schema(),

@@ -287,7 +287,6 @@ impl RecordBatch {
         options: &RecordBatchOptions,
         constraints: Option<Vec<crate::SymbolicExpr>>,
     ) -> Result<Self, ArrowError> {
-        // dbg!(&columns);
         // check that number of fields in schema match column length
         if schema.fields().len() != columns.len() {
             return Err(ArrowError::InvalidArgumentError(format!(

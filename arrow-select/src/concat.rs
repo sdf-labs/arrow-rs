@@ -255,8 +255,13 @@ fn concat_fallback(arrays: &[&dyn Array], capacity: Capacities) -> Result<ArrayR
     for (i, a) in arrays.iter().enumerate() {
         mutable.extend(i, 0, a.len())
     }
-
-    Ok(make_array(mutable.freeze()))
+    let array = make_array(mutable.freeze());
+    let symbolic_data: Vec<_> = arrays
+        .iter()
+        .flat_map(|a| a.to_symbolic_data())
+        .collect::<Vec<_>>();
+    let array = array.with_symbolic_data(&symbolic_data);
+    Ok(array)
 }
 
 /// Concatenates `batches` together into a single [`RecordBatch`].
@@ -271,7 +276,6 @@ pub fn concat_batches<'a>(
 ) -> Result<RecordBatch, ArrowError> {
     // When schema is empty, sum the number of the rows of all batches
     let x = input_batches.into_iter().collect::<Vec<_>>();
-    dbg!(&x);
     if schema.fields().is_empty() {
         let num_rows: usize = x.iter().cloned().map(RecordBatch::num_rows).sum();
         let mut options = RecordBatchOptions::default();
@@ -304,7 +308,13 @@ pub fn concat_batches<'a>(
         }
     }
     let constraints = if is_some { Some(constraints) } else { None };
-    RecordBatch::try_new_with_options_and_constraints(schema.clone(), arrays, &options, constraints)
+    let res = RecordBatch::try_new_with_options_and_constraints(
+        schema.clone(),
+        arrays,
+        &options,
+        constraints,
+    );
+    res
 }
 
 #[cfg(test)]

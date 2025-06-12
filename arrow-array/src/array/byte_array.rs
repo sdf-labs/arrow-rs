@@ -530,7 +530,6 @@ impl<T: ByteArrayType> Array for GenericByteArray<T> {
     }
 
     fn to_symbolic_data(&self) -> super::SymbolicArrayData {
-        dbg!(&self.data_type, &self, &self.symbolic_data);
         self.symbolic_data
             .clone()
             .unwrap_or(self.make_symbolic_data())
