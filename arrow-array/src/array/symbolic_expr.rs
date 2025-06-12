@@ -1,3 +1,5 @@
+use arrow_schema::DataType;
+
 /// Literal values used in symbolic expressions
 #[derive(Debug, Clone, PartialEq)]
 pub enum ScalarValue {
@@ -31,6 +33,27 @@ pub enum ScalarValue {
     Utf8(Option<String>),
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum VarType {
+    /// A boolean variable
+    Boolean,
+    /// A string variable
+    String,
+    /// A int variable
+    Int,
+}
+
+pub fn arrow_type_to_var_type(arrow_type: DataType) -> VarType {
+    match arrow_type {
+        DataType::Boolean => VarType::Boolean,
+        DataType::Utf8 | DataType::LargeUtf8 => VarType::String,
+        DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64 |
+        DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64 |
+        DataType::Decimal128(_, _) | DataType::Decimal256(_, _) => VarType::Int,
+        _ => VarType::String, // Default to String for other types
+    }
+}
+
 /// Operators applied to symbolic expressions
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Hash)]
 pub enum Operator {
@@ -60,6 +83,10 @@ pub enum Operator {
     And,
     /// Logical OR, like `||`
     Or,
+    /// Logical NOT, like `!`
+    Not,
+    /// In, like `in`
+    In,
 }
 
 /// A symbolic expression for a columnar array.
@@ -79,7 +106,12 @@ pub enum Expr {
         column: usize,
         /// The position of the row
         row: usize,
+        /// The variable type
+        var_type: VarType,
     },
+
+    /// A list of symbolic expressions
+    List(Vec<Expr>),
 
     /// A binary symbolic expression
     BinaryExpr {
@@ -108,8 +140,13 @@ impl Expr {
     }
 
     /// Create a symbolic variable
-    pub fn variable(table: String, column: usize, row: usize) -> Self {
-        Expr::Variable { table, column, row }
+    pub fn variable(table: String, column: usize, row: usize, var_type: VarType) -> Self {
+        Expr::Variable {
+            table,
+            column,
+            row,
+            var_type,
+        }
     }
 
     /// Create a binary symbolic expression
@@ -138,13 +175,20 @@ impl Expr {
 }
 
 /// Create a symbolic expression array for a column reference using table name and column position
-pub fn make_colref_symbolic_expr_array(table: String, column: usize, len: usize) -> Vec<Expr> {
+pub fn make_colref_symbolic_expr_array(
+    table: String,
+    column: usize,
+    len: usize,
+    row_offset: usize,
+    var_type: VarType,
+) -> Vec<Expr> {
     let mut res = Vec::with_capacity(len);
     for i in 0..len {
         res.push(Expr::Variable {
             table: table.clone(),
             column,
-            row: i,
+            row: i + row_offset,
+            var_type,
         });
     }
     res
