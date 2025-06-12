@@ -73,13 +73,15 @@ macro_rules! sym {
 
         let mut sym_res = vec![];
         for i in 0..syms1.len() {
-            let l = &syms1[i];
-            let r = &syms2[i];
-            sym_res.push(SymbolicExpr::binary(
-                l.clone(),
-                SymbolicOperator::$op,
-                r.clone(),
-            ));
+            for j in 0..syms2.len() {
+                let l = &syms1[i];
+                let r = &syms2[j];
+                sym_res.push(SymbolicExpr::binary(
+                    l.clone(),
+                    SymbolicOperator::$op,
+                    r.clone(),
+                ));
+            }
         }
         Ok(expr.with_symbolic_data(&sym_res))
     }};
