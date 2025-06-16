@@ -81,6 +81,7 @@ use crate::iterator::ArrayIter;
 mod symbolic_expr;
 pub use symbolic_expr::make_colref_symbolic_expr_array;
 pub use symbolic_expr::arrow_type_to_var_type;
+pub use symbolic_expr::add_constraint_to_row;
 pub use symbolic_expr::VarType as SymbolicVarType;
 pub use symbolic_expr::Expr as SymbolicExpr;
 pub use symbolic_expr::Operator as SymbolicOperator;

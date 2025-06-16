@@ -205,6 +205,7 @@ pub struct RecordBatch {
     ///
     /// This is stored separately from the columns to handle the case of no columns
     row_count: usize,
+    row_symbolic_data: Option<Vec<crate::SymbolicExpr>>,
     constraints: Option<Vec<crate::SymbolicExpr>>,
 }
 
@@ -238,7 +239,7 @@ impl RecordBatch {
     /// ```
     pub fn try_new(schema: SchemaRef, columns: Vec<ArrayRef>) -> Result<Self, ArrowError> {
         let options = RecordBatchOptions::new();
-        Self::try_new_impl(schema, columns, &options, None)
+        Self::try_new_impl(schema, columns, &options, None, None)
     }
 
     /// Creates a `RecordBatch` from a schema and columns, with additional options,
@@ -250,7 +251,7 @@ impl RecordBatch {
         columns: Vec<ArrayRef>,
         options: &RecordBatchOptions,
     ) -> Result<Self, ArrowError> {
-        Self::try_new_impl(schema, columns, options, None)
+        Self::try_new_impl(schema, columns, options, None, None)
     }
 
     /// Creates a `RecordBatch` from a schema and columns, with additional options and symbolic constraints.
@@ -260,7 +261,48 @@ impl RecordBatch {
         options: &RecordBatchOptions,
         constraints: Option<Vec<crate::SymbolicExpr>>,
     ) -> Result<Self, ArrowError> {
-        Self::try_new_impl(schema, columns, options, constraints)
+        Self::try_new_impl(schema, columns, options, None, constraints)
+    }
+
+    /// Creates a `RecordBatch` from a schema and columns, with symbolic data.
+    pub fn try_new_with_symbolic_data(
+        schema: SchemaRef,
+        columns: Vec<ArrayRef>,
+        row_symbolic_data: Option<Vec<crate::SymbolicExpr>>,
+    ) -> Result<Self, ArrowError> {
+        Self::try_new_impl(
+            schema,
+            columns,
+            &RecordBatchOptions::new(),
+            row_symbolic_data,
+            None,
+        )
+    }
+
+    /// Creates a `RecordBatch` from a schema and columns, with constraints.
+    pub fn try_new_with_constraints(
+        schema: SchemaRef,
+        columns: Vec<ArrayRef>,
+        constraints: Option<Vec<crate::SymbolicExpr>>,
+    ) -> Result<Self, ArrowError> {
+        Self::try_new_impl(
+            schema,
+            columns,
+            &RecordBatchOptions::new(),
+            None,
+            constraints,
+        )
+    }
+
+    /// Creates a `RecordBatch` from a schema and columns, with additional options and symbolic constraints.
+    pub fn try_new_with_options_and_constraints_and_symbolic_data(
+        schema: SchemaRef,
+        columns: Vec<ArrayRef>,
+        options: &RecordBatchOptions,
+        row_symbolic_data: Option<Vec<crate::SymbolicExpr>>,
+        constraints: Option<Vec<crate::SymbolicExpr>>,
+    ) -> Result<Self, ArrowError> {
+        Self::try_new_impl(schema, columns, options, row_symbolic_data, constraints)
     }
 
     /// Creates a new empty [`RecordBatch`].
@@ -275,6 +317,7 @@ impl RecordBatch {
             schema,
             columns,
             row_count: 0,
+            row_symbolic_data: None,
             constraints: None,
         }
     }
@@ -285,6 +328,7 @@ impl RecordBatch {
         schema: SchemaRef,
         columns: Vec<ArrayRef>,
         options: &RecordBatchOptions,
+        row_symbolic_data: Option<Vec<crate::SymbolicExpr>>,
         constraints: Option<Vec<crate::SymbolicExpr>>,
     ) -> Result<Self, ArrowError> {
         // check that number of fields in schema match column length
@@ -350,6 +394,7 @@ impl RecordBatch {
             schema,
             columns,
             row_count,
+            row_symbolic_data,
             constraints,
         })
     }
@@ -370,6 +415,7 @@ impl RecordBatch {
             schema,
             columns: self.columns,
             row_count: self.row_count,
+            row_symbolic_data: self.row_symbolic_data,
             constraints: self.constraints,
         })
     }
@@ -387,6 +433,11 @@ impl RecordBatch {
     /// Returns the constraints of the record batch.
     pub fn constraints(&self) -> Option<&[crate::SymbolicExpr]> {
         self.constraints.as_ref().map(|c| &c[..])
+    }
+
+    /// Returns the symbolic data of the record batch.
+    pub fn row_symbolic_data(&self) -> Option<&[crate::SymbolicExpr]> {
+        self.row_symbolic_data.as_ref().map(|c| &c[..])
     }
 
     /// Projects the schema onto the specified columns
@@ -637,6 +688,7 @@ impl RecordBatch {
             schema: self.schema.clone(),
             columns,
             row_count: length,
+            row_symbolic_data: self.row_symbolic_data.clone(),
             constraints,
         }
     }
@@ -797,6 +849,7 @@ impl From<StructArray> for RecordBatch {
             schema: Arc::new(Schema::new(fields)),
             row_count,
             columns,
+            row_symbolic_data: None,
             constraints: None,
         }
     }

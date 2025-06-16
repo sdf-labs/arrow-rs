@@ -300,18 +300,24 @@ pub fn concat_batches<'a>(
     }
     let options = RecordBatchOptions::new();
     let mut constraints = vec![];
+    let mut row_symbolic_data = vec![];
     let mut is_some = false;
     for batch in batches {
         if let Some(c) = batch.constraints().map(|c| c.to_vec()) {
             is_some = true;
             constraints.extend(c);
         }
+        if let Some(c) = batch.row_symbolic_data() {
+            row_symbolic_data.extend(c.to_vec());
+        }
     }
     let constraints = if is_some { Some(constraints) } else { None };
-    let res = RecordBatch::try_new_with_options_and_constraints(
+    let row_symbolic_data = if row_symbolic_data.is_empty() { None } else { Some(row_symbolic_data) };
+    let res = RecordBatch::try_new_with_options_and_constraints_and_symbolic_data(
         schema.clone(),
         arrays,
         &options,
+        row_symbolic_data,
         constraints,
     );
     res

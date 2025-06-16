@@ -236,12 +236,36 @@ pub fn filter_record_batch(
         vec![]
     };
     all_constraints.extend(constraints.unwrap_or_default());
-    let constraints = Some(all_constraints);
 
-    RecordBatch::try_new_with_options_and_constraints(
+    //let mut row_symbolic_data = record_batch.row_symbolic_data().map(|c| c.to_vec());
+
+    // Add constraints to the row symbolic data from all_constraints
+    let mut row_symbolic_data = record_batch.row_symbolic_data().map(|c| {
+        let mut data = c.to_vec();
+        // Add constraints to each row
+        data.iter_mut().for_each(|row| {
+            all_constraints.iter().for_each(|c| {
+                if let SymbolicExpr::Row {
+                    table,
+                    row_id,
+                    constraint,
+                } = row
+                {
+                    add_constraint_to_row(row, c.clone());
+                }
+            });
+        });
+        data
+    });
+
+    let constraints = Some(all_constraints);
+    dbg!(&row_symbolic_data);
+
+    RecordBatch::try_new_with_options_and_constraints_and_symbolic_data(
         record_batch.schema(),
         filtered_arrays,
         &options,
+        row_symbolic_data,
         constraints,
     )
 }

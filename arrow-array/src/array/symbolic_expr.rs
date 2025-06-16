@@ -47,9 +47,16 @@ pub fn arrow_type_to_var_type(arrow_type: DataType) -> VarType {
     match arrow_type {
         DataType::Boolean => VarType::Boolean,
         DataType::Utf8 | DataType::LargeUtf8 => VarType::String,
-        DataType::Int8 | DataType::Int16 | DataType::Int32 | DataType::Int64 |
-        DataType::UInt8 | DataType::UInt16 | DataType::UInt32 | DataType::UInt64 |
-        DataType::Decimal128(_, _) | DataType::Decimal256(_, _) => VarType::Int,
+        DataType::Int8
+        | DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::UInt8
+        | DataType::UInt16
+        | DataType::UInt32
+        | DataType::UInt64
+        | DataType::Decimal128(_, _)
+        | DataType::Decimal256(_, _) => VarType::Int,
         _ => VarType::String, // Default to String for other types
     }
 }
@@ -110,8 +117,26 @@ pub enum Expr {
         var_type: VarType,
     },
 
+    /// A symbolic variable representing a row in a table
+    Row {
+        /// The name of the table
+        table: String,
+        /// The position of the row
+        row_id: usize,
+        /// The row constraint
+        constraint: Option<Vec<Expr>>,
+    },
+
     /// A list of symbolic expressions
     List(Vec<Expr>),
+
+    /// A count symbolic expression
+    Count {
+        /// The column to count
+        expr: Box<Expr>,
+        /// Whether the count is distinct
+        is_distinct: bool,
+    },
 
     /// A binary symbolic expression
     BinaryExpr {
@@ -146,6 +171,32 @@ impl Expr {
             column,
             row,
             var_type,
+        }
+    }
+
+    /// Create a symbolic row
+    pub fn row(table: String, row_id: usize) -> Self {
+        Expr::Row {
+            table,
+            row_id,
+            constraint: None,
+        }
+    }
+
+    /// Create a symbolic row with a constraint
+    pub fn row_with_constraint(table: String, row_id: usize, constraint: Vec<Expr>) -> Self {
+        Expr::Row {
+            table,
+            row_id,
+            constraint: Some(constraint),
+        }
+    }
+
+    /// Create a count symbolic expression
+    pub fn count(expr: Expr, is_distinct: bool) -> Self {
+        Expr::Count {
+            expr: Box::new(expr),
+            is_distinct,
         }
     }
 
@@ -192,4 +243,27 @@ pub fn make_colref_symbolic_expr_array(
         });
     }
     res
+}
+
+pub fn add_constraint_to_row(row: &mut Expr, constraint: Expr) {
+    if let Expr::Row {
+        constraint: Some(constraints),
+        ..
+    } = row
+    {
+        constraints.push(constraint);
+    } else if let Expr::Row {
+        table,
+        row_id,
+        constraint: None,
+    } = row
+    {
+        *row = Expr::Row {
+            table: table.clone(),
+            row_id: *row_id,
+            constraint: Some(vec![constraint]),
+        };
+    } else {
+        panic!("Expr is not a symbolic row");
+    }
 }
