@@ -396,7 +396,7 @@ impl Codec {
                 Ok(Self::Dictionary(converter, owned))
             }
             d if !d.is_nested() => Ok(Self::Stateless),
-            DataType::List(f) | DataType::LargeList(f) => {
+            DataType::List(f) | DataType::LargeList(f) | DataType::FixedSizeList(f, _) => {
                 // The encoded contents will be inverted if descending is set to true
                 // As such we set `descending` to false and negate nulls first if it
                 // it set to true
@@ -450,6 +450,7 @@ impl Codec {
                 let values = match array.data_type() {
                     DataType::List(_) => as_list_array(array).values(),
                     DataType::LargeList(_) => as_large_list_array(array).values(),
+                    DataType::FixedSizeList(_, _) => as_fixed_size_list_array(array).values(),
                     _ => unreachable!(),
                 };
                 let rows = converter.convert_columns(&[values.clone()])?;
@@ -536,9 +537,10 @@ impl RowConverter {
     fn supports_datatype(d: &DataType) -> bool {
         match d {
             _ if !d.is_nested() => true,
-            DataType::List(f) | DataType::LargeList(f) | DataType::Map(f, _) => {
-                Self::supports_datatype(f.data_type())
-            }
+            DataType::List(f)
+            | DataType::LargeList(f)
+            | DataType::FixedSizeList(f, _)
+            | DataType::Map(f, _) => Self::supports_datatype(f.data_type()),
             DataType::Struct(f) => f.iter().all(|x| Self::supports_datatype(x.data_type())),
             _ => false,
         }
@@ -1244,6 +1246,11 @@ fn row_lengths(cols: &[ArrayRef], encoders: &[Encoder]) -> Vec<usize> {
                 DataType::LargeList(_) => {
                     list::compute_lengths(&mut lengths, rows, as_large_list_array(array))
                 }
+                DataType::FixedSizeList(_, _) => list::compute_lengths_fixed_size_list(
+                    &mut lengths,
+                    rows,
+                    as_fixed_size_list_array(array),
+                ),
                 _ => unreachable!(),
             },
         }
@@ -1340,6 +1347,13 @@ fn encode_column(
             DataType::LargeList(_) => {
                 list::encode(data, offsets, rows, opts, as_large_list_array(column))
             }
+            DataType::FixedSizeList(_, _) => list::encode_fixed_size_list(
+                data,
+                offsets,
+                rows,
+                opts,
+                as_fixed_size_list_array(column),
+            ),
             _ => unreachable!(),
         },
     }
@@ -1425,6 +1439,13 @@ unsafe fn decode_column(
             DataType::LargeList(_) => {
                 Arc::new(list::decode::<i64>(converter, rows, field, validate_utf8)?)
             }
+            DataType::FixedSizeList(_, size) => Arc::new(list::decode_fixed_size_list(
+                converter,
+                rows,
+                field,
+                *size,
+                validate_utf8,
+            )?),
             _ => unreachable!(),
         },
     };
