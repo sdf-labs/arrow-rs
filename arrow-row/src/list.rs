@@ -15,7 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use crate::{fixed, null_sentinel, LengthTracker, RowConverter, Rows, SortField};
+use crate::{fixed, null_sentinel, RowConverter, Rows, SortField};
 use arrow_array::{new_null_array, Array, FixedSizeListArray, GenericListArray, OffsetSizeTrait};
 use arrow_buffer::{ArrowNativeType, Buffer, MutableBuffer};
 use arrow_data::ArrayDataBuilder;
@@ -186,21 +186,21 @@ pub unsafe fn decode<O: OffsetSizeTrait>(
 }
 
 pub fn compute_lengths_fixed_size_list(
-    tracker: &mut LengthTracker,
+    lengths: &mut [usize],
     rows: &Rows,
     array: &FixedSizeListArray,
 ) {
     let value_length = array.value_length().as_usize();
-    tracker.push_variable((0..array.len()).map(|idx| {
-        match array.is_valid(idx) {
+    lengths.iter_mut().enumerate().for_each(|(idx, length)| {
+        *length = match array.is_valid(idx) {
             true => {
                 1 + ((idx * value_length)..(idx + 1) * value_length)
                     .map(|child_idx| rows.row(child_idx).as_ref().len())
                     .sum::<usize>()
             }
             false => 1,
-        }
-    }))
+        };
+    })
 }
 
 /// Encodes the provided `FixedSizeListArray` to `out` with the provided `SortOptions`
