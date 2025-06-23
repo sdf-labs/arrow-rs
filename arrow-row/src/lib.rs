@@ -1293,7 +1293,7 @@ fn row_lengths(cols: &[ArrayRef], encoders: &[Encoder]) -> Vec<usize> {
                     list::compute_lengths(&mut lengths, rows, as_large_list_array(array))
                 }
                 DataType::FixedSizeList(_, _) => compute_lengths_fixed_size_list(
-                    &mut tracker,
+                    &mut lengths,
                     rows,
                     as_fixed_size_list_array(array),
                 ),
