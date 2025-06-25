@@ -139,6 +139,7 @@ use arrow_schema::*;
 use variable::{decode_binary_view, decode_string_view};
 
 use crate::fixed::{decode_bool, decode_fixed_size_binary, decode_primitive};
+use crate::list::{compute_lengths_fixed_size_list, encode_fixed_size_list};
 use crate::variable::{decode_binary, decode_string};
 
 mod fixed;
@@ -335,6 +336,46 @@ mod variable;
 ///
 /// With `[]` represented by an empty byte array, and `null` a null byte array.
 ///
+/// ## Fixed Size List Encoding
+///
+/// Fixed Size Lists are encoded by first encoding all child elements to the row format.
+///
+/// A non-null list value is then encoded as 0x01 followed by the concatenation of each
+/// of the child elements. A null list value is encoded as a null marker.
+///
+/// For example given:
+///
+/// ```text
+/// [1_u8, 2_u8]
+/// [3_u8, null]
+/// null
+/// ```
+///
+/// The elements would be converted to:
+///
+/// ```text
+///     ┌──┬──┐     ┌──┬──┐     ┌──┬──┐        ┌──┬──┐
+///  1  │01│01│  2  │01│02│  3  │01│03│  null  │00│00│
+///     └──┴──┘     └──┴──┘     └──┴──┘        └──┴──┘
+///```
+///
+/// Which would be encoded as
+///
+/// ```text
+///                 ┌──┬──┬──┬──┬──┐
+///  [1_u8, 2_u8]   │01│01│01│01│02│
+///                 └──┴──┴──┴──┴──┘
+///                     └ 1 ┘ └ 2 ┘
+///                 ┌──┬──┬──┬──┬──┐
+///  [3_u8, null]   │01│01│03│00│00│
+///                 └──┴──┴──┴──┴──┘
+///                     └ 1 ┘ └null┘
+///                 ┌──┐
+///  null           │00│
+///                 └──┘
+///
+///```
+///
 /// # Ordering
 ///
 /// ## Float Ordering
@@ -409,6 +450,11 @@ impl Codec {
                 let converter = RowConverter::new(vec![field])?;
                 Ok(Self::List(converter))
             }
+            DataType::FixedSizeList(f, _) => {
+                let field = SortField::new_with_options(f.data_type().clone(), sort_field.options);
+                let converter = RowConverter::new(vec![field])?;
+                Ok(Self::List(converter))
+            }
             DataType::Struct(f) => {
                 let sort_fields = f
                     .iter()
@@ -450,6 +496,7 @@ impl Codec {
                 let values = match array.data_type() {
                     DataType::List(_) => as_list_array(array).values(),
                     DataType::LargeList(_) => as_large_list_array(array).values(),
+                    DataType::FixedSizeList(_, _) => as_fixed_size_list_array(array).values(),
                     _ => unreachable!(),
                 };
                 let rows = converter.convert_columns(&[values.clone()])?;
@@ -536,9 +583,10 @@ impl RowConverter {
     fn supports_datatype(d: &DataType) -> bool {
         match d {
             _ if !d.is_nested() => true,
-            DataType::List(f) | DataType::LargeList(f) | DataType::Map(f, _) => {
-                Self::supports_datatype(f.data_type())
-            }
+            DataType::List(f)
+            | DataType::LargeList(f)
+            | DataType::FixedSizeList(f, _)
+            | DataType::Map(f, _) => Self::supports_datatype(f.data_type()),
             DataType::Struct(f) => f.iter().all(|x| Self::supports_datatype(x.data_type())),
             _ => false,
         }
@@ -1244,6 +1292,11 @@ fn row_lengths(cols: &[ArrayRef], encoders: &[Encoder]) -> Vec<usize> {
                 DataType::LargeList(_) => {
                     list::compute_lengths(&mut lengths, rows, as_large_list_array(array))
                 }
+                DataType::FixedSizeList(_, _) => compute_lengths_fixed_size_list(
+                    &mut tracker,
+                    rows,
+                    as_fixed_size_list_array(array),
+                ),
                 _ => unreachable!(),
             },
         }
@@ -1340,6 +1393,9 @@ fn encode_column(
             DataType::LargeList(_) => {
                 list::encode(data, offsets, rows, opts, as_large_list_array(column))
             }
+            DataType::FixedSizeList(_, _) => {
+                encode_fixed_size_list(data, offsets, rows, opts, as_fixed_size_list_array(column))
+            }
             _ => unreachable!(),
         },
     }
@@ -1425,6 +1481,13 @@ unsafe fn decode_column(
             DataType::LargeList(_) => {
                 Arc::new(list::decode::<i64>(converter, rows, field, validate_utf8)?)
             }
+            DataType::FixedSizeList(_, value_length) => Arc::new(list::decode_fixed_size_list(
+                converter,
+                rows,
+                field,
+                validate_utf8,
+                value_length.as_usize(),
+            )?),
             _ => unreachable!(),
         },
     };
@@ -2016,6 +2079,9 @@ mod tests {
         builder.values().append_null();
         builder.append(true);
         builder.append(true);
+        builder.values().append_value(17); // MASKED
+        builder.values().append_null(); // MASKED
+        builder.append(false);
 
         let list = Arc::new(builder.finish()) as ArrayRef;
         let d = list.data_type().clone();
@@ -2024,11 +2090,12 @@ mod tests {
 
         let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
         assert!(rows.row(0) > rows.row(1)); // [32, 52, 32] > [32, 52, 12]
-        assert!(rows.row(2) < rows.row(1)); // [32, 42] < [32, 52, 12]
-        assert!(rows.row(3) < rows.row(2)); // null < [32, 42]
-        assert!(rows.row(4) < rows.row(2)); // [32, null] < [32, 42]
-        assert!(rows.row(5) < rows.row(2)); // [] < [32, 42]
+        assert!(rows.row(2) < rows.row(1)); // [32, 52] < [32, 52, 12]
+        assert!(rows.row(3) < rows.row(2)); // null < [32, 52]
+        assert!(rows.row(4) < rows.row(2)); // [32, null] < [32, 52]
+        assert!(rows.row(5) < rows.row(2)); // [] < [32, 52]
         assert!(rows.row(3) < rows.row(5)); // null < []
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
 
         let back = converter.convert_rows(&rows).unwrap();
         assert_eq!(back.len(), 1);
@@ -2041,11 +2108,12 @@ mod tests {
         let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
 
         assert!(rows.row(0) > rows.row(1)); // [32, 52, 32] > [32, 52, 12]
-        assert!(rows.row(2) < rows.row(1)); // [32, 42] < [32, 52, 12]
-        assert!(rows.row(3) > rows.row(2)); // null > [32, 42]
-        assert!(rows.row(4) > rows.row(2)); // [32, null] > [32, 42]
-        assert!(rows.row(5) < rows.row(2)); // [] < [32, 42]
+        assert!(rows.row(2) < rows.row(1)); // [32, 52] < [32, 52, 12]
+        assert!(rows.row(3) > rows.row(2)); // null > [32, 52]
+        assert!(rows.row(4) > rows.row(2)); // [32, null] > [32, 52]
+        assert!(rows.row(5) < rows.row(2)); // [] < [32, 52]
         assert!(rows.row(3) > rows.row(5)); // null > []
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
 
         let back = converter.convert_rows(&rows).unwrap();
         assert_eq!(back.len(), 1);
@@ -2058,11 +2126,12 @@ mod tests {
         let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
 
         assert!(rows.row(0) < rows.row(1)); // [32, 52, 32] < [32, 52, 12]
-        assert!(rows.row(2) > rows.row(1)); // [32, 42] > [32, 52, 12]
-        assert!(rows.row(3) > rows.row(2)); // null > [32, 42]
-        assert!(rows.row(4) > rows.row(2)); // [32, null] > [32, 42]
-        assert!(rows.row(5) > rows.row(2)); // [] > [32, 42]
+        assert!(rows.row(2) > rows.row(1)); // [32, 52] > [32, 52, 12]
+        assert!(rows.row(3) > rows.row(2)); // null > [32, 52]
+        assert!(rows.row(4) > rows.row(2)); // [32, null] > [32, 52]
+        assert!(rows.row(5) > rows.row(2)); // [] > [32, 52]
         assert!(rows.row(3) > rows.row(5)); // null > []
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
 
         let back = converter.convert_rows(&rows).unwrap();
         assert_eq!(back.len(), 1);
@@ -2075,11 +2144,12 @@ mod tests {
         let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
 
         assert!(rows.row(0) < rows.row(1)); // [32, 52, 32] < [32, 52, 12]
-        assert!(rows.row(2) > rows.row(1)); // [32, 42] > [32, 52, 12]
-        assert!(rows.row(3) < rows.row(2)); // null < [32, 42]
-        assert!(rows.row(4) < rows.row(2)); // [32, null] < [32, 42]
-        assert!(rows.row(5) > rows.row(2)); // [] > [32, 42]
+        assert!(rows.row(2) > rows.row(1)); // [32, 52] > [32, 52, 12]
+        assert!(rows.row(3) < rows.row(2)); // null < [32, 52]
+        assert!(rows.row(4) < rows.row(2)); // [32, null] < [32, 52]
+        assert!(rows.row(5) > rows.row(2)); // [] > [32, 52]
         assert!(rows.row(3) < rows.row(5)); // null < []
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
 
         let back = converter.convert_rows(&rows).unwrap();
         assert_eq!(back.len(), 1);
@@ -2188,6 +2258,114 @@ mod tests {
     fn test_large_list() {
         test_single_list::<i64>();
         test_nested_list::<i64>();
+    }
+
+    #[test]
+    fn test_fixed_size_list() {
+        let mut builder = FixedSizeListBuilder::new(Int32Builder::new(), 3);
+        builder.values().append_value(32);
+        builder.values().append_value(52);
+        builder.values().append_value(32);
+        builder.append(true);
+        builder.values().append_value(32);
+        builder.values().append_value(52);
+        builder.values().append_value(12);
+        builder.append(true);
+        builder.values().append_value(32);
+        builder.values().append_value(52);
+        builder.values().append_null();
+        builder.append(true);
+        builder.values().append_value(32); // MASKED
+        builder.values().append_value(52); // MASKED
+        builder.values().append_value(13); // MASKED
+        builder.append(false);
+        builder.values().append_value(32);
+        builder.values().append_null();
+        builder.values().append_null();
+        builder.append(true);
+        builder.values().append_null();
+        builder.values().append_null();
+        builder.values().append_null();
+        builder.append(true);
+        builder.values().append_value(17); // MASKED
+        builder.values().append_null(); // MASKED
+        builder.values().append_value(77); // MASKED
+        builder.append(false);
+
+        let list = Arc::new(builder.finish()) as ArrayRef;
+        let d = list.data_type().clone();
+
+        // Default sorting (ascending, nulls first)
+        let converter = RowConverter::new(vec![SortField::new(d.clone())]).unwrap();
+
+        let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
+        assert!(rows.row(0) > rows.row(1)); // [32, 52, 32] > [32, 52, 12]
+        assert!(rows.row(2) < rows.row(1)); // [32, 52, null] < [32, 52, 12]
+        assert!(rows.row(3) < rows.row(2)); // null < [32, 52, null]
+        assert!(rows.row(4) < rows.row(2)); // [32, null, null] < [32, 52, null]
+        assert!(rows.row(5) < rows.row(2)); // [null, null, null] < [32, 52, null]
+        assert!(rows.row(3) < rows.row(5)); // null < [null, null, null]
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
+
+        let back = converter.convert_rows(&rows).unwrap();
+        assert_eq!(back.len(), 1);
+        back[0].to_data().validate_full().unwrap();
+        assert_eq!(&back[0], &list);
+
+        // Ascending, null last
+        let options = SortOptions::default().asc().with_nulls_first(false);
+        let field = SortField::new_with_options(d.clone(), options);
+        let converter = RowConverter::new(vec![field]).unwrap();
+        let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
+        assert!(rows.row(0) > rows.row(1)); // [32, 52, 32] > [32, 52, 12]
+        assert!(rows.row(2) > rows.row(1)); // [32, 52, null] > [32, 52, 12]
+        assert!(rows.row(3) > rows.row(2)); // null > [32, 52, null]
+        assert!(rows.row(4) > rows.row(2)); // [32, null, null] > [32, 52, null]
+        assert!(rows.row(5) > rows.row(2)); // [null, null, null] > [32, 52, null]
+        assert!(rows.row(3) > rows.row(5)); // null > [null, null, null]
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
+
+        let back = converter.convert_rows(&rows).unwrap();
+        assert_eq!(back.len(), 1);
+        back[0].to_data().validate_full().unwrap();
+        assert_eq!(&back[0], &list);
+
+        // Descending, nulls last
+        let options = SortOptions::default().desc().with_nulls_first(false);
+        let field = SortField::new_with_options(d.clone(), options);
+        let converter = RowConverter::new(vec![field]).unwrap();
+        let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
+        assert!(rows.row(0) < rows.row(1)); // [32, 52, 32] < [32, 52, 12]
+        assert!(rows.row(2) > rows.row(1)); // [32, 52, null] > [32, 52, 12]
+        assert!(rows.row(3) > rows.row(2)); // null > [32, 52, null]
+        assert!(rows.row(4) > rows.row(2)); // [32, null, null] > [32, 52, null]
+        assert!(rows.row(5) > rows.row(2)); // [null, null, null] > [32, 52, null]
+        assert!(rows.row(3) > rows.row(5)); // null > [null, null, null]
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
+
+        let back = converter.convert_rows(&rows).unwrap();
+        assert_eq!(back.len(), 1);
+        back[0].to_data().validate_full().unwrap();
+        assert_eq!(&back[0], &list);
+
+        // Descending, nulls first
+        let options = SortOptions::default().desc().with_nulls_first(true);
+        let field = SortField::new_with_options(d, options);
+        let converter = RowConverter::new(vec![field]).unwrap();
+        let rows = converter.convert_columns(&[Arc::clone(&list)]).unwrap();
+
+        assert!(rows.row(0) < rows.row(1)); // [32, 52, 32] < [32, 52, 12]
+        assert!(rows.row(2) < rows.row(1)); // [32, 52, null] > [32, 52, 12]
+        assert!(rows.row(3) < rows.row(2)); // null < [32, 52, null]
+        assert!(rows.row(4) < rows.row(2)); // [32, null, null] < [32, 52, null]
+        assert!(rows.row(5) < rows.row(2)); // [null, null, null] > [32, 52, null]
+        assert!(rows.row(3) < rows.row(5)); // null < [null, null, null]
+        assert_eq!(rows.row(3), rows.row(6)); // null = null (different masked values)
+
+        let back = converter.convert_rows(&rows).unwrap();
+        assert_eq!(back.len(), 1);
+        back[0].to_data().validate_full().unwrap();
+        assert_eq!(&back[0], &list);
     }
 
     fn generate_primitive_array<K>(len: usize, valid_percent: f64) -> PrimitiveArray<K>
