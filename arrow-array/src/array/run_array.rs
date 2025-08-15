@@ -389,6 +389,14 @@ impl<T: RunEndIndexType> Array for RunArray<T> {
             + self.run_ends.inner().inner().capacity()
             + self.values.get_array_memory_size()
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl<R: RunEndIndexType> std::fmt::Debug for RunArray<R> {
@@ -615,6 +623,14 @@ impl<R: RunEndIndexType, V: Sync> Array for TypedRunArray<'_, R, V> {
 
     fn get_array_memory_size(&self) -> usize {
         self.run_array.get_array_memory_size()
+    }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
     }
 }
 

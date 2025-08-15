@@ -1,0 +1,151 @@
+/// Literal values used in symbolic expressions
+#[derive(Debug, Clone, PartialEq)]
+pub enum ScalarValue {
+    /// represents `DataType::Null` (castable to/from any other type)
+    Null,
+    /// true or false value
+    Boolean(Option<bool>),
+    /// 32bit float
+    Float32(Option<f32>),
+    /// 64bit float
+    Float64(Option<f64>),
+    /// 128bit decimal, using the i128 to represent the decimal, precision scale
+    Decimal128(Option<i128>, u8, i8),
+    /// signed 8bit int
+    Int8(Option<i8>),
+    /// signed 16bit int
+    Int16(Option<i16>),
+    /// signed 32bit int
+    Int32(Option<i32>),
+    /// signed 64bit int
+    Int64(Option<i64>),
+    /// unsigned 8bit int
+    UInt8(Option<u8>),
+    /// unsigned 16bit int
+    UInt16(Option<u16>),
+    /// unsigned 32bit int
+    UInt32(Option<u32>),
+    /// unsigned 64bit int
+    UInt64(Option<u64>),
+    /// utf-8 encoded string.
+    Utf8(Option<String>),
+}
+
+/// Operators applied to symbolic expressions
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Hash)]
+pub enum Operator {
+    /// Expressions are equal
+    Equal,
+    /// Expressions are not equal
+    NotEqual,
+    /// Left side is smaller than right side
+    Less,
+    /// Left side is smaller or equal to right side
+    LessEqual,
+    /// Left side is greater than right side
+    Greater,
+    /// Left side is greater or equal to right side
+    GreaterEqual,
+    /// Addition
+    Plus,
+    /// Subtraction
+    Minus,
+    /// Multiplication operator, like `*`
+    Multiply,
+    /// Division operator, like `/`
+    Divide,
+    /// Remainder operator, like `%`
+    Modulo,
+    /// Logical AND, like `&&`
+    And,
+    /// Logical OR, like `||`
+    Or,
+}
+
+/// A symbolic expression for a columnar array.
+///
+/// This is used to represent the symbolic data of an array.
+/// Used to represent the symbolic data of an array.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr {
+    /// A literal symbolic expression
+    Literal(ScalarValue),
+
+    /// A symbolic variable representing a cell in a table
+    Variable {
+        /// The name of the table
+        table: String,
+        /// The position of the column
+        column: usize,
+        /// The position of the row
+        row: usize,
+    },
+
+    /// A binary symbolic expression
+    BinaryExpr {
+        /// The left side of the binary expression
+        left: Box<Expr>,
+        /// The operator of the binary expression
+        op: Operator,
+        /// The right side of the binary expression
+        right: Box<Expr>,
+    },
+
+    /// A negation symbolic expression  
+    Not(Box<Expr>),
+
+    /// A null check symbolic expression
+    IsNull(Box<Expr>),
+
+    /// A not null check symbolic expression
+    IsNotNull(Box<Expr>),
+}
+
+impl Expr {
+    /// Create a literal symbolic expression
+    pub fn literal(val: ScalarValue) -> Self {
+        Expr::Literal(val)
+    }
+
+    /// Create a symbolic variable
+    pub fn variable(table: String, column: usize, row: usize) -> Self {
+        Expr::Variable { table, column, row }
+    }
+
+    /// Create a binary symbolic expression
+    pub fn binary(left: Expr, op: Operator, right: Expr) -> Self {
+        Expr::BinaryExpr {
+            left: Box::new(left),
+            op,
+            right: Box::new(right),
+        }
+    }
+
+    /// Create a negation symbolic expression
+    pub fn not(expr: Expr) -> Self {
+        Expr::Not(Box::new(expr))
+    }
+
+    /// Create a null check symbolic expression
+    pub fn is_null(expr: Expr) -> Self {
+        Expr::IsNull(Box::new(expr))
+    }
+
+    /// Create a not null check symbolic expression
+    pub fn is_not_null(expr: Expr) -> Self {
+        Expr::IsNotNull(Box::new(expr))
+    }
+}
+
+/// Create a symbolic expression array for a column reference using table name and column position
+pub fn make_colref_symbolic_expr_array(table: String, column: usize, len: usize) -> Vec<Expr> {
+    let mut res = Vec::with_capacity(len);
+    for i in 0..len {
+        res.push(Expr::Variable {
+            table: table.clone(),
+            column,
+            row: i,
+        });
+    }
+    res
+}

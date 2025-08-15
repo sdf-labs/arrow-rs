@@ -29,6 +29,7 @@ use arrow_array::{
     downcast_primitive_array, AnyDictionaryArray, Array, ArrowNativeTypeOp, BooleanArray, Datum,
     FixedSizeBinaryArray, GenericByteArray, GenericByteViewArray,
 };
+use arrow_array::{SymbolicExpr, SymbolicOperator};
 use arrow_buffer::bit_util::ceil;
 use arrow_buffer::{BooleanBuffer, MutableBuffer, NullBuffer};
 use arrow_schema::ArrowError;
@@ -62,6 +63,28 @@ impl std::fmt::Display for Op {
     }
 }
 
+macro_rules! sym {
+    ($op:ident, $lhs:expr, $rhs:expr) => {{
+        let lhs = $lhs.get().0;
+        let rhs = $rhs.get().0;
+        let expr = compare_op(Op::$op, $lhs, $rhs)?;
+        let syms1 = lhs.to_symbolic_data();
+        let syms2 = rhs.to_symbolic_data();
+
+        let mut sym_res = vec![];
+        for i in 0..syms1.len() {
+            let l = &syms1[i];
+            let r = &syms2[i];
+            sym_res.push(SymbolicExpr::binary(
+                l.clone(),
+                SymbolicOperator::$op,
+                r.clone(),
+            ));
+        }
+        Ok(expr.with_symbolic_data(&sym_res))
+    }};
+}
+
 /// Perform `left == right` operation on two [`Datum`].
 ///
 /// Comparing null values on either side will yield a null in the corresponding
@@ -76,7 +99,7 @@ impl std::fmt::Display for Op {
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn eq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::Equal, lhs, rhs)
+    sym!(Equal, lhs, rhs)
 }
 
 /// Perform `left != right` operation on two [`Datum`].
@@ -93,7 +116,7 @@ pub fn eq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> 
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn neq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::NotEqual, lhs, rhs)
+    sym!(NotEqual, lhs, rhs)
 }
 
 /// Perform `left < right` operation on two [`Datum`].
@@ -110,7 +133,7 @@ pub fn neq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError>
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn lt(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::Less, lhs, rhs)
+    sym!(Less, lhs, rhs)
 }
 
 /// Perform `left <= right` operation on two [`Datum`].
@@ -127,7 +150,7 @@ pub fn lt(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> 
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn lt_eq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::LessEqual, lhs, rhs)
+    sym!(LessEqual, lhs, rhs)
 }
 
 /// Perform `left > right` operation on two [`Datum`].
@@ -144,7 +167,7 @@ pub fn lt_eq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowErro
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn gt(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::Greater, lhs, rhs)
+    sym!(Greater, lhs, rhs)
 }
 
 /// Perform `left >= right` operation on two [`Datum`].
@@ -161,7 +184,7 @@ pub fn gt(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> 
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn gt_eq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::GreaterEqual, lhs, rhs)
+    sym!(GreaterEqual, lhs, rhs)
 }
 
 /// Perform `left IS DISTINCT FROM right` operation on two [`Datum`]
@@ -179,7 +202,9 @@ pub fn gt_eq(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowErro
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn distinct(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::Distinct, lhs, rhs)
+    let _res = compare_op(Op::Distinct, lhs, rhs);
+    unimplemented!()
+    // res
 }
 
 /// Perform `left IS NOT DISTINCT FROM right` operation on two [`Datum`]
@@ -197,7 +222,9 @@ pub fn distinct(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowE
 /// Nested types, such as lists, are not supported as the null semantics are not well-defined.
 /// For comparisons involving nested types see [`crate::ord::make_comparator`]
 pub fn not_distinct(lhs: &dyn Datum, rhs: &dyn Datum) -> Result<BooleanArray, ArrowError> {
-    compare_op(Op::NotDistinct, lhs, rhs)
+    let _res = compare_op(Op::NotDistinct, lhs, rhs);
+    unimplemented!()
+    // res
 }
 
 /// Perform `op` on the provided `Datum`

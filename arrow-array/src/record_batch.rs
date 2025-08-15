@@ -205,6 +205,7 @@ pub struct RecordBatch {
     ///
     /// This is stored separately from the columns to handle the case of no columns
     row_count: usize,
+    constraints: Option<Vec<crate::SymbolicExpr>>,
 }
 
 impl RecordBatch {
@@ -237,7 +238,7 @@ impl RecordBatch {
     /// ```
     pub fn try_new(schema: SchemaRef, columns: Vec<ArrayRef>) -> Result<Self, ArrowError> {
         let options = RecordBatchOptions::new();
-        Self::try_new_impl(schema, columns, &options)
+        Self::try_new_impl(schema, columns, &options, None)
     }
 
     /// Creates a `RecordBatch` from a schema and columns, with additional options,
@@ -249,7 +250,17 @@ impl RecordBatch {
         columns: Vec<ArrayRef>,
         options: &RecordBatchOptions,
     ) -> Result<Self, ArrowError> {
-        Self::try_new_impl(schema, columns, options)
+        Self::try_new_impl(schema, columns, options, None)
+    }
+
+    /// Creates a `RecordBatch` from a schema and columns, with additional options and symbolic constraints.
+    pub fn try_new_with_options_and_constraints(
+        schema: SchemaRef,
+        columns: Vec<ArrayRef>,
+        options: &RecordBatchOptions,
+        constraints: Option<Vec<crate::SymbolicExpr>>,
+    ) -> Result<Self, ArrowError> {
+        Self::try_new_impl(schema, columns, options, constraints)
     }
 
     /// Creates a new empty [`RecordBatch`].
@@ -264,6 +275,7 @@ impl RecordBatch {
             schema,
             columns,
             row_count: 0,
+            constraints: None,
         }
     }
 
@@ -273,7 +285,9 @@ impl RecordBatch {
         schema: SchemaRef,
         columns: Vec<ArrayRef>,
         options: &RecordBatchOptions,
+        constraints: Option<Vec<crate::SymbolicExpr>>,
     ) -> Result<Self, ArrowError> {
+        // dbg!(&columns);
         // check that number of fields in schema match column length
         if schema.fields().len() != columns.len() {
             return Err(ArrowError::InvalidArgumentError(format!(
@@ -337,6 +351,7 @@ impl RecordBatch {
             schema,
             columns,
             row_count,
+            constraints,
         })
     }
 
@@ -356,6 +371,7 @@ impl RecordBatch {
             schema,
             columns: self.columns,
             row_count: self.row_count,
+            constraints: self.constraints,
         })
     }
 
@@ -367,6 +383,11 @@ impl RecordBatch {
     /// Returns a reference to the [`Schema`] of the record batch.
     pub fn schema_ref(&self) -> &SchemaRef {
         &self.schema
+    }
+
+    /// Returns the constraints of the record batch.
+    pub fn constraints(&self) -> Option<&[crate::SymbolicExpr]> {
+        self.constraints.as_ref().map(|c| &c[..])
     }
 
     /// Projects the schema onto the specified columns
@@ -611,10 +632,13 @@ impl RecordBatch {
             .map(|column| column.slice(offset, length))
             .collect();
 
+        let constraints = self.constraints.clone();
+
         Self {
             schema: self.schema.clone(),
             columns,
             row_count: length,
+            constraints,
         }
     }
 
@@ -774,6 +798,7 @@ impl From<StructArray> for RecordBatch {
             schema: Arc::new(Schema::new(fields)),
             row_count,
             columns,
+            constraints: None,
         }
     }
 }

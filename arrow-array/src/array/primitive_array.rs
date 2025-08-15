@@ -23,7 +23,7 @@ use crate::temporal_conversions::{
 };
 use crate::timezone::Tz;
 use crate::trusted_len::trusted_len_unzip;
-use crate::types::*;
+use crate::{types::*, SymbolicScalarValue};
 use crate::{Array, ArrayAccessor, ArrayRef, Scalar};
 use arrow_buffer::{i256, ArrowNativeType, Buffer, NullBuffer, ScalarBuffer};
 use arrow_data::bit_iterator::try_for_each_valid_idx;
@@ -351,7 +351,7 @@ pub type Time64MicrosecondArray = PrimitiveArray<Time64MicrosecondType>;
 /// hold values such as `00:02:00.123456789`
 pub type Time64NanosecondArray = PrimitiveArray<Time64NanosecondType>;
 
-/// A [`PrimitiveArray`] of “calendar” intervals in whole months
+/// A [`PrimitiveArray`] of "calendar" intervals in whole months
 ///
 /// See [`IntervalYearMonthType`] for details on representation and caveats.
 ///
@@ -366,7 +366,7 @@ pub type Time64NanosecondArray = PrimitiveArray<Time64NanosecondType>;
 /// ```
 pub type IntervalYearMonthArray = PrimitiveArray<IntervalYearMonthType>;
 
-/// A [`PrimitiveArray`] of “calendar” intervals in days and milliseconds
+/// A [`PrimitiveArray`] of "calendar" intervals in days and milliseconds
 ///
 /// See [`IntervalDayTime`] for details on representation and caveats.
 ///
@@ -382,7 +382,7 @@ pub type IntervalYearMonthArray = PrimitiveArray<IntervalYearMonthType>;
 /// ```
 pub type IntervalDayTimeArray = PrimitiveArray<IntervalDayTimeType>;
 
-/// A [`PrimitiveArray`] of “calendar” intervals in  months, days, and nanoseconds.
+/// A [`PrimitiveArray`] of "calendar" intervals in  months, days, and nanoseconds.
 ///
 /// See [`IntervalMonthDayNano`] for details on representation and caveats.
 ///
@@ -530,6 +530,7 @@ pub struct PrimitiveArray<T: ArrowPrimitiveType> {
     /// Values data
     values: ScalarBuffer<T::Native>,
     nulls: Option<NullBuffer>,
+    symbolic_data: Option<super::SymbolicArrayData>,
 }
 
 impl<T: ArrowPrimitiveType> Clone for PrimitiveArray<T> {
@@ -538,6 +539,7 @@ impl<T: ArrowPrimitiveType> Clone for PrimitiveArray<T> {
             data_type: self.data_type.clone(),
             values: self.values.clone(),
             nulls: self.nulls.clone(),
+            symbolic_data: self.symbolic_data.clone(),
         }
     }
 }
@@ -574,6 +576,7 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             data_type: T::DATA_TYPE,
             values: vec![T::Native::usize_as(0); length].into(),
             nulls: Some(NullBuffer::new_null(length)),
+            symbolic_data: None,
         }
     }
 
@@ -601,6 +604,7 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             data_type: T::DATA_TYPE,
             values,
             nulls,
+            symbolic_data: None,
         })
     }
 
@@ -610,7 +614,18 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             data_type: T::DATA_TYPE,
             values: vec![value].into(),
             nulls: None,
+            symbolic_data: None,
         })
+    }
+
+    /// Clone a new [`PrimitiveArray`] with the supplied symbolic data
+    pub fn with_symbolic_data(&self, symbolic_data: &[super::SymbolicExpr]) -> Self {
+        Self {
+            data_type: self.data_type.clone(),
+            values: self.values.clone(),
+            nulls: self.nulls.clone(),
+            symbolic_data: Some(symbolic_data.to_vec()),
+        }
     }
 
     /// Deconstruct this array into its constituent parts
@@ -710,6 +725,7 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             data_type: T::DATA_TYPE,
             values: ScalarBuffer::new(val_buf, 0, len),
             nulls: None,
+            symbolic_data: None,
         }
     }
 
@@ -724,6 +740,7 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             data_type: T::DATA_TYPE,
             values: ScalarBuffer::new(val_buf, 0, len),
             nulls,
+            symbolic_data: None,
         }
     }
 
@@ -760,6 +777,10 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             data_type: self.data_type.clone(),
             values: self.values.slice(offset, length),
             nulls: self.nulls.as_ref().map(|n| n.slice(offset, length)),
+            symbolic_data: self
+                .symbolic_data
+                .as_ref()
+                .map(|s| s[offset..offset + length].to_vec()),
         }
     }
 
@@ -1110,6 +1131,41 @@ impl<T: ArrowPrimitiveType> PrimitiveArray<T> {
             }
         }
     }
+
+    /// Convert the array to symbolic data
+    pub fn make_symbolic_data(&self) -> super::SymbolicArrayData {
+        let mut symbolic_data = vec![];
+        for i in 0..self.len() {
+            let lit = convert_to_symbolic_scalar_value::<T>(self.value(i));
+            symbolic_data.push(super::SymbolicExpr::Literal(lit));
+        }
+        symbolic_data
+    }
+}
+
+fn convert_to_symbolic_scalar_value<T: ArrowPrimitiveType>(
+    value: T::Native,
+) -> SymbolicScalarValue {
+    match T::DATA_TYPE {
+        DataType::Boolean => SymbolicScalarValue::Boolean(Some(value.as_usize() != 0)),
+        DataType::Int8 => SymbolicScalarValue::Int8(Some(value.as_usize() as i8)),
+        DataType::Int16 => SymbolicScalarValue::Int16(Some(value.as_usize() as i16)),
+        DataType::Int32 => SymbolicScalarValue::Int32(Some(value.as_usize() as i32)),
+        DataType::Int64 => SymbolicScalarValue::Int64(Some(value.as_usize() as i64)),
+        DataType::UInt8 => SymbolicScalarValue::UInt8(Some(value.as_usize() as u8)),
+        DataType::UInt16 => SymbolicScalarValue::UInt16(Some(value.as_usize() as u16)),
+        DataType::UInt32 => SymbolicScalarValue::UInt32(Some(value.as_usize() as u32)),
+        DataType::UInt64 => SymbolicScalarValue::UInt64(Some(value.as_usize() as u64)),
+        DataType::Float32 => SymbolicScalarValue::Float32(Some(value.as_usize() as f32)),
+        DataType::Float64 => SymbolicScalarValue::Float64(Some(value.as_usize() as f64)),
+        DataType::Decimal128(precision, scale) => {
+            SymbolicScalarValue::Decimal128(Some(value.as_usize() as i128), precision, scale)
+        }
+        _ => panic!(
+            "Unsupported primitive type for symbolic expressions: {:?}",
+            T::DATA_TYPE
+        ),
+    }
 }
 
 impl<T: ArrowPrimitiveType> From<PrimitiveArray<T>> for ArrayData {
@@ -1181,6 +1237,16 @@ impl<T: ArrowPrimitiveType> Array for PrimitiveArray<T> {
 
     fn get_array_memory_size(&self) -> usize {
         std::mem::size_of::<Self>() + self.get_buffer_memory_size()
+    }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        self.symbolic_data
+            .clone()
+            .unwrap_or(self.make_symbolic_data())
+    }
+
+    fn with_symbolic_data(&self, symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        Arc::new(self.with_symbolic_data(symbolic_data))
     }
 }
 
@@ -1298,7 +1364,11 @@ impl<T: ArrowPrimitiveType> std::fmt::Debug for PrimitiveArray<T> {
             }
             _ => std::fmt::Debug::fmt(&array.value(index), f),
         })?;
-        write!(f, "]")
+        write!(f, "]")?;
+        if let Some(symbolic_data) = &self.symbolic_data {
+            write!(f, ",\n{:?}", symbolic_data)?;
+        }
+        Ok(())
     }
 }
 
@@ -1529,6 +1599,7 @@ impl<T: ArrowPrimitiveType> From<ArrayData> for PrimitiveArray<T> {
             data_type: data.data_type().clone(),
             values,
             nulls: data.nulls().cloned(),
+            symbolic_data: None,
         }
     }
 }

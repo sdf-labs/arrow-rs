@@ -89,6 +89,7 @@ pub struct GenericByteArray<T: ByteArrayType> {
     value_offsets: OffsetBuffer<T::Offset>,
     value_data: Buffer,
     nulls: Option<NullBuffer>,
+    symbolic_data: Option<super::SymbolicArrayData>,
 }
 
 impl<T: ByteArrayType> Clone for GenericByteArray<T> {
@@ -98,6 +99,7 @@ impl<T: ByteArrayType> Clone for GenericByteArray<T> {
             value_offsets: self.value_offsets.clone(),
             value_data: self.value_data.clone(),
             nulls: self.nulls.clone(),
+            symbolic_data: self.symbolic_data.clone(),
         }
     }
 }
@@ -151,6 +153,7 @@ impl<T: ByteArrayType> GenericByteArray<T> {
             value_offsets: offsets,
             value_data: values,
             nulls,
+            symbolic_data: None,
         })
     }
 
@@ -169,6 +172,7 @@ impl<T: ByteArrayType> GenericByteArray<T> {
             value_offsets: offsets,
             value_data: values,
             nulls,
+            symbolic_data: None,
         }
     }
 
@@ -179,12 +183,24 @@ impl<T: ByteArrayType> GenericByteArray<T> {
             value_offsets: OffsetBuffer::new_zeroed(len),
             value_data: MutableBuffer::new(0).into(),
             nulls: Some(NullBuffer::new_null(len)),
+            symbolic_data: None,
         }
     }
 
     /// Create a new [`Scalar`] from `v`
     pub fn new_scalar(value: impl AsRef<T::Native>) -> Scalar<Self> {
         Scalar::new(Self::from_iter_values(std::iter::once(value)))
+    }
+
+    /// Clone a new [`GenericByteArray`] with the supplied symbolic data
+    pub fn with_symbolic_data(&self, symbolic_data: &[super::SymbolicExpr]) -> Self {
+        Self {
+            data_type: self.data_type.clone(),
+            value_offsets: self.value_offsets.clone(),
+            value_data: self.value_data.clone(),
+            nulls: self.nulls.clone(),
+            symbolic_data: Some(symbolic_data.to_vec()),
+        }
     }
 
     /// Creates a [`GenericByteArray`] based on an iterator of values without nulls
@@ -218,6 +234,7 @@ impl<T: ByteArrayType> GenericByteArray<T> {
             value_data: values.into(),
             value_offsets,
             nulls: None,
+            symbolic_data: None,
         }
     }
 
@@ -327,6 +344,10 @@ impl<T: ByteArrayType> GenericByteArray<T> {
             value_offsets: self.value_offsets.slice(offset, length),
             value_data: self.value_data.clone(),
             nulls: self.nulls.as_ref().map(|n| n.slice(offset, length)),
+            symbolic_data: self
+                .symbolic_data
+                .as_ref()
+                .map(|s| s[offset..offset + length].to_vec()),
         }
     }
 
@@ -412,6 +433,23 @@ impl<T: ByteArrayType> GenericByteArray<T> {
             }
         }
     }
+
+    /// Convert the array to symbolic data
+    pub fn make_symbolic_data(&self) -> super::SymbolicArrayData {
+        let mut symbolic_data = vec![];
+        for i in 0..self.len() {
+            let lit = convert_to_symbolic_scalar_value::<T>(self.value(i));
+            symbolic_data.push(super::SymbolicExpr::Literal(lit));
+        }
+        symbolic_data
+    }
+}
+
+fn convert_to_symbolic_scalar_value<T: ByteArrayType>(
+    value: &T::Native,
+) -> super::SymbolicScalarValue {
+    // TODO: are we handling this correctly for all byte types?
+    super::SymbolicScalarValue::Utf8(Some(format!("{:?}", value)))
 }
 
 impl<T: ByteArrayType> std::fmt::Debug for GenericByteArray<T> {
@@ -420,7 +458,11 @@ impl<T: ByteArrayType> std::fmt::Debug for GenericByteArray<T> {
         print_long_array(self, f, |array, index, f| {
             std::fmt::Debug::fmt(&array.value(index), f)
         })?;
-        write!(f, "]")
+        write!(f, "]")?;
+        if let Some(symbolic_data) = &self.symbolic_data {
+            write!(f, ",\n{:?}", symbolic_data)?;
+        }
+        Ok(())
     }
 }
 
@@ -486,6 +528,17 @@ impl<T: ByteArrayType> Array for GenericByteArray<T> {
     fn get_array_memory_size(&self) -> usize {
         std::mem::size_of::<Self>() + self.get_buffer_memory_size()
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        dbg!(&self.data_type, &self, &self.symbolic_data);
+        self.symbolic_data
+            .clone()
+            .unwrap_or(self.make_symbolic_data())
+    }
+
+    fn with_symbolic_data(&self, symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        Arc::new(self.with_symbolic_data(symbolic_data))
+    }
 }
 
 impl<'a, T: ByteArrayType> ArrayAccessor for &'a GenericByteArray<T> {
@@ -526,6 +579,7 @@ impl<T: ByteArrayType> From<ArrayData> for GenericByteArray<T> {
             value_data,
             data_type: T::DATA_TYPE,
             nulls: data.nulls().cloned(),
+            symbolic_data: None,
         }
     }
 }

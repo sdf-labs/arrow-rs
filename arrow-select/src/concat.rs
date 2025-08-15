@@ -270,14 +270,16 @@ pub fn concat_batches<'a>(
     input_batches: impl IntoIterator<Item = &'a RecordBatch>,
 ) -> Result<RecordBatch, ArrowError> {
     // When schema is empty, sum the number of the rows of all batches
+    let x = input_batches.into_iter().collect::<Vec<_>>();
+    dbg!(&x);
     if schema.fields().is_empty() {
-        let num_rows: usize = input_batches.into_iter().map(RecordBatch::num_rows).sum();
+        let num_rows: usize = x.iter().cloned().map(RecordBatch::num_rows).sum();
         let mut options = RecordBatchOptions::default();
         options.row_count = Some(num_rows);
         return RecordBatch::try_new_with_options(schema.clone(), vec![], &options);
     }
 
-    let batches: Vec<&RecordBatch> = input_batches.into_iter().collect();
+    let batches: Vec<&RecordBatch> = x;
     if batches.is_empty() {
         return Ok(RecordBatch::new_empty(schema.clone()));
     }
@@ -292,7 +294,17 @@ pub fn concat_batches<'a>(
         )?;
         arrays.push(array);
     }
-    RecordBatch::try_new(schema.clone(), arrays)
+    let options = RecordBatchOptions::new();
+    let mut constraints = vec![];
+    let mut is_some = false;
+    for batch in batches {
+        if let Some(c) = batch.constraints().map(|c| c.to_vec()) {
+            is_some = true;
+            constraints.extend(c);
+        }
+    }
+    let constraints = if is_some { Some(constraints) } else { None };
+    RecordBatch::try_new_with_options_and_constraints(schema.clone(), arrays, &options, constraints)
 }
 
 #[cfg(test)]

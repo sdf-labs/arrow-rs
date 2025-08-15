@@ -400,6 +400,14 @@ impl Array for StructArray {
         }
         size
     }
+
+    fn to_symbolic_data(&self) -> super::SymbolicArrayData {
+        todo!()
+    }
+
+    fn with_symbolic_data(&self, _symbolic_data: &[super::SymbolicExpr]) -> ArrayRef {
+        todo!()
+    }
 }
 
 impl From<Vec<(FieldRef, ArrayRef)>> for StructArray {

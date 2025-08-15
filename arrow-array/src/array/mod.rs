@@ -78,6 +78,15 @@ pub use list_view_array::*;
 
 use crate::iterator::ArrayIter;
 
+mod symbolic_expr;
+pub use symbolic_expr::make_colref_symbolic_expr_array;
+pub use symbolic_expr::Expr as SymbolicExpr;
+pub use symbolic_expr::Operator as SymbolicOperator;
+pub use symbolic_expr::ScalarValue as SymbolicScalarValue;
+
+/// A symbolic array data is a vector of symbolic expressions.
+pub type SymbolicArrayData = Vec<SymbolicExpr>;
+
 /// An array in the [arrow columnar format](https://arrow.apache.org/docs/format/Columnar.html)
 pub trait Array: std::fmt::Debug + Send + Sync {
     /// Returns the array as [`Any`] so that it can be
@@ -336,6 +345,12 @@ pub trait Array: std::fmt::Debug + Send + Sync {
     /// This value will always be greater than returned by `get_buffer_memory_size()` and
     /// includes the overhead of the data structures that contain the pointers to the various buffers.
     fn get_array_memory_size(&self) -> usize;
+
+    /// Returns the symbolic data of this array
+    fn to_symbolic_data(&self) -> SymbolicArrayData;
+
+    /// Clone a new [`Array`] with the supplied symbolic data
+    fn with_symbolic_data(&self, symbolic_data: &[SymbolicExpr]) -> ArrayRef;
 }
 
 /// A reference-counted reference to a generic `Array`
@@ -419,6 +434,14 @@ impl Array for ArrayRef {
     fn get_array_memory_size(&self) -> usize {
         self.as_ref().get_array_memory_size()
     }
+
+    fn to_symbolic_data(&self) -> SymbolicArrayData {
+        self.as_ref().to_symbolic_data()
+    }
+
+    fn with_symbolic_data(&self, symbolic_data: &[SymbolicExpr]) -> ArrayRef {
+        self.as_ref().with_symbolic_data(symbolic_data)
+    }
 }
 
 impl<T: Array> Array for &T {
@@ -488,6 +511,14 @@ impl<T: Array> Array for &T {
 
     fn get_array_memory_size(&self) -> usize {
         T::get_array_memory_size(self)
+    }
+
+    fn to_symbolic_data(&self) -> SymbolicArrayData {
+        T::to_symbolic_data(self)
+    }
+
+    fn with_symbolic_data(&self, symbolic_data: &[SymbolicExpr]) -> ArrayRef {
+        T::with_symbolic_data(self, symbolic_data)
     }
 }
 
