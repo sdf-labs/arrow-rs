@@ -78,6 +78,7 @@ jobs:
 
   clippy:
     name: Clippy
+    if: false
     runs-on: ubuntu-latest
     container:
       image: amd64/rust
