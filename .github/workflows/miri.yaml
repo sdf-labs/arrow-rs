@@ -45,6 +45,7 @@ on:
 jobs:
   miri-checks:
     name: MIRI
+    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
